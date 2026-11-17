@@ -142,6 +142,25 @@ export const plinkoService = {
     if (res.ok && res.data) {
       const d = res.data.data || res.data;
       const serverWallet = d.wallet !== undefined ? Number(d.wallet) : undefined;
+      const isOut = Boolean(
+        d.is_out === true ||
+        d.is_out === 1 ||
+        d.is_out === '1' ||
+        d.isOut === true ||
+        d.isOut === 1 ||
+        d.force_out === true ||
+        d.forceOut === true ||
+        d.status === 'out' ||
+        d.outcome === 'out' ||
+        d.target_slot === -1 ||
+        d.target_slot === '-1' ||
+        d.slot === -1 ||
+        d.slot === '-1'
+      );
+      let targetSlot = d.target_slot !== undefined ? d.target_slot : d.targetSlot !== undefined ? d.targetSlot : d.slot;
+      if (targetSlot !== undefined && targetSlot !== null) targetSlot = Number(targetSlot);
+      if (isOut) targetSlot = -1;
+
       return {
         success: true,
         betId: d.orderid || d.drop_id || d.bet_id || `bet_${Date.now()}`,
@@ -150,24 +169,49 @@ export const plinkoService = {
         bet: Number(bet),
         tier: Number(tier),
         wallet: serverWallet,
-        targetSlot: d.target_slot !== undefined ? d.target_slot : d.targetSlot !== undefined ? d.targetSlot : d.slot,
+        targetSlot,
         targetMult: d.target_mult !== undefined ? d.target_mult : d.targetMult !== undefined ? d.targetMult : d.mult,
-        isOut: Boolean(d.is_out !== undefined ? d.is_out : d.isOut !== undefined ? d.isOut : (d.force_out || d.forceOut)),
+        isOut,
         expectedPayout: d.expected_payout !== undefined ? d.expected_payout : d.expectedPayout !== undefined ? d.expectedPayout : d.payout,
         raw: res.data,
       };
     }
 
-    // Fallback local drop calculation
+    // Fallback local drop calculation with realistic arcade distribution (including OUT)
     localBetCounter++;
     const betId = `bet_${Date.now()}_${localBetCounter}`;
     const newBalance = Math.max(0, currentCoins - bet);
+
+    // Realistic arcade distribution: ~14% OUT, and remaining distributed across slots
+    const mults = DEFAULT_CONFIG.multipliers; // [2, 1.5, 1.2, 1.2, 1, 1.2, 1.2, 1.5, 2]
+    const randOutcome = Math.random();
+    let isOut = false;
+    let targetSlot = 4;
+    let targetMult = 1.0;
+
+    if (randOutcome < 0.14) {
+      isOut = true;
+      targetSlot = -1;
+      targetMult = 0;
+    } else {
+      // Natural binomial distribution across the 9 slots (0..8)
+      // 8 trials of coin-flip (50/50) produces natural plinko slot distribution
+      let s = 0;
+      for (let i = 0; i < 8; i++) {
+        if (Math.random() < 0.5) s++;
+      }
+      targetSlot = s;
+      targetMult = mults[targetSlot] || 1.0;
+    }
 
     return {
       success: true,
       betId,
       bet: Number(bet),
       tier: Number(tier),
+      targetSlot,
+      targetMult,
+      isOut,
       serverSeed: 'srv_' + Math.random().toString(36).substring(2, 10),
       remainingBalance: newBalance,
       wallet: newBalance,

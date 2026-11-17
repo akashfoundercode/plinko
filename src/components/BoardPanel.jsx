@@ -62,7 +62,7 @@ export default function BoardPanel() {
       },
       onSettle: ({ slot, targetMult, tier = 0, bet = 10, betId, x }) => {
         const { derived: d, actions: a } = latest.current;
-        const mult = targetMult !== undefined && targetMult !== null ? Number(targetMult) : (d.slotMults[slot] || 1.0);
+        const mult = targetMult !== undefined && targetMult !== null && Number(targetMult) > 0 ? Number(targetMult) : (d.slotMults[slot] || 1.0);
         // Exact calculation: Bet Amount * Multiplier
         const reward = Math.round(Number(bet) * mult * 100) / 100;
 

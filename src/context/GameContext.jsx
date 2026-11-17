@@ -331,7 +331,7 @@ export function GameProvider({ children }) {
       multPegFactor: MULT_PEG_FACTOR,
       ballCost: BALL_COST,
       ballValue: BASE_BALL_VALUE + (state.unify.ballValue || 0),
-      maxBalls: 1 + (state.unify.ballCount || 0) + (own('extra-ball') ? 1 : 0),
+      maxBalls: 10 + (state.unify.ballCount || 0) + (own('extra-ball') ? 1 : 0),
       autoUnlocked: true,
       autoIntervalMs: Math.max(800, 3500 - 250 * (state.unify.autoSpeed || 0)),
       ballWeight: 1 + 0.3 * (state.unify.ballWeight || 0),

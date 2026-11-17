@@ -91,19 +91,22 @@ export class PlinkoEngine {
     const world = this.engine.world;
     const statics = [];
 
+    this.pegs = [];
+    this.pegGrid = [];
     for (let r = 0; r < rows; r++) {
+      this.pegGrid[r] = [];
       const n = r + 2;
       const y = startY + r * spacingY;
       for (let j = 0; j < n; j++) {
         const x = W / 2 + (j - (n - 1) / 2) * spacingX;
         const body = Bodies.circle(x, y, pegR, {
           isStatic: true,
-          restitution: 0.65,
-          friction: 0.002,
+          isSensor: true,
           label: 'peg',
         });
         body.plugin = { id: `${r}-${j}`, color: ROW_COLORS[r % ROW_COLORS.length], flash: 0 };
         this.pegs.push(body);
+        this.pegGrid[r][j] = body;
         statics.push(body);
       }
     }
@@ -114,24 +117,19 @@ export class PlinkoEngine {
       Bodies.rectangle(W + 10, H / 2, 20, H * 2, { isStatic: true, restitution: 0.7, label: 'wall' })
     );
 
-    // Slot dividers: 9 slots with Left and Right OUT gutters
+    // Slot dividers: 9 slots with Left and Right OUT gutters (isSensor: true prevents balls ever wedging or halting)
     const slotAreaW = W - outGutterW * 2;
     const slotW = slotAreaW / slotCount;
 
-    // Dividers separating OUT gutters from the 9 slots (frictionless so balls never stick or halt)
     statics.push(
       Bodies.rectangle(outGutterW, slotTop + (H - slotTop) / 2, 3, H - slotTop, {
         isStatic: true,
-        friction: 0,
-        frictionStatic: 0,
-        restitution: 0.2,
+        isSensor: true,
         label: 'divider',
       }),
       Bodies.rectangle(W - outGutterW, slotTop + (H - slotTop) / 2, 3, H - slotTop, {
         isStatic: true,
-        friction: 0,
-        frictionStatic: 0,
-        restitution: 0.2,
+        isSensor: true,
         label: 'divider',
       })
     );
@@ -142,9 +140,7 @@ export class PlinkoEngine {
       statics.push(
         Bodies.rectangle(x, slotTop + (H - slotTop) / 2, 3, H - slotTop, {
           isStatic: true,
-          friction: 0,
-          frictionStatic: 0,
-          restitution: 0.2,
+          isSensor: true,
           label: 'divider',
         })
       );
@@ -178,12 +174,11 @@ export class PlinkoEngine {
 
   drop({ value, free = false, tier = 0, bet = 0, betId = null, targetSlot, targetMult, isOut = false }) {
     const { ballR, spawnX, spawnY } = BOARD;
-    // Drops cleanly inside the starting 2 pegs
-    const spawnOffsetX = rand(-2, 2);
-    const ball = Bodies.circle(spawnX + spawnOffsetX, spawnY, ballR, {
-      restitution: 0.52,
+    // Spawns dead center directly above the starting 2 pegs (spawnX = 220, spawnY = 26)
+    const ball = Bodies.circle(spawnX, spawnY, ballR, {
+      restitution: 0.68,
       friction: 0.001,
-      frictionAir: 0.0035,
+      frictionAir: 0.003,
       density: 0.002,
       label: 'ball',
       collisionFilter: { group: -1 }, // balls never collide with each other
@@ -201,14 +196,12 @@ export class PlinkoEngine {
       born: performance.now(),
       stuck: 0,
     };
-    Body.setVelocity(ball, { x: rand(-0.25, 0.25), y: 0.4 });
+    Body.setVelocity(ball, { x: 0, y: 0.7 });
     Composite.add(this.engine.world, ball);
     this.balls.add(ball);
 
-    // Pre-determine target trajectory from the very drop!
-    if (targetSlot !== undefined || targetMult !== undefined || isOut) {
-      this.setBallTarget(ball, { orderid: betId, targetSlot, targetMult, isOut });
-    }
+    // Pre-determine target trajectory immediately on drop
+    this.setBallTarget(ball, { orderid: betId, targetSlot, targetMult, isOut });
 
     return ball;
   }
@@ -225,10 +218,11 @@ export class PlinkoEngine {
     ball.plugin.targetMult = targetMult;
 
     if (outFlag) {
-      // Pick left or right gutter (random 50/50 or whichever side spawn leaned)
-      const isLeft = (ball.position?.x !== undefined ? ball.position.x : Math.random() * W) <= W / 2;
+      // Pick left or right gutter (50/50 probability)
+      const isLeft = Math.random() < 0.5;
       ball.plugin.outSide = isLeft ? 'left' : 'right';
-      ball.plugin.targetX = isLeft ? outGutterW * 0.5 : W - outGutterW * 0.5;
+      ball.plugin.targetX = isLeft ? 18 : W - 18;
+      ball.plugin.targetSlot = -1;
     } else {
       let s = targetSlot;
       if (s === undefined || s === null || s === '' || Number(s) < 0) {
@@ -237,7 +231,10 @@ export class PlinkoEngine {
           s = mults.findIndex((m) => Math.abs(m - Number(targetMult)) < 0.05);
           if (s < 0) s = 4;
         } else {
-          s = 4;
+          // Binomial coin flips across the 9 slots
+          let coins = 0;
+          for (let i = 0; i < 8; i++) if (Math.random() < 0.5) coins++;
+          s = coins;
         }
       }
       s = Math.max(0, Math.min(slotCount - 1, Number(s)));
@@ -245,6 +242,133 @@ export class PlinkoEngine {
       ball.plugin.targetSlot = s;
       ball.plugin.targetX = targetX;
     }
+
+    this.buildPathForBall(ball);
+  }
+
+  buildPathForBall(ball) {
+    const info = ball.plugin;
+    if (!info) return;
+    const { W, spawnX = 220, spawnY = 26, outGutterW = 36, slotCount = 9, slotTop = 366, settleY = 410 } = BOARD;
+    const slotAreaW = W - outGutterW * 2;
+    const slotW = slotAreaW / slotCount;
+    const waypoints = [];
+
+    // WP 0: Spawn point
+    waypoints.push({ x: spawnX, y: spawnY, isPeg: false });
+
+    // WP 1: Dead-center directly between the starting 2 pegs of Row 0 (pegs at 201 & 239, y = 72)
+    waypoints.push({ x: spawnX, y: 72, isPeg: false });
+
+    if (info.isOut) {
+      const isLeft = info.outSide === 'left';
+      // User requirement: hit 1-2 pegs at top, then lead cleanly to outside gutter on either side
+      if (isLeft) {
+        // Peg Hit 1: Row 1 center peg at (220, 105) -> hits left shoulder, bounces left
+        const peg1 = this.pegGrid?.[1]?.[1];
+        waypoints.push({ x: 212.5, y: 93.5, isPeg: true, peg: peg1 });
+        waypoints.push({ x: 204, y: 104, isPeg: false });
+        // Peg Hit 2: Row 2 peg at (163, 138) -> hits left shoulder, bounces outward left
+        const peg2 = this.pegGrid?.[2]?.[0];
+        waypoints.push({ x: 155.5, y: 126.5, isPeg: true, peg: peg2 });
+        waypoints.push({ x: 144, y: 138, isPeg: false });
+        // Sweep outward along outer left gutter
+        waypoints.push({ x: 105, y: 175, isPeg: false });
+        waypoints.push({ x: 60, y: 220, isPeg: false });
+        waypoints.push({ x: 28, y: 268, isPeg: false });
+        waypoints.push({ x: 18, y: 315, isPeg: false });
+        waypoints.push({ x: 18, y: slotTop, isPeg: false });
+        waypoints.push({ x: 18, y: settleY, isPeg: false });
+      } else {
+        // Peg Hit 1: Row 1 center peg at (220, 105) -> hits right shoulder, bounces right
+        const peg1 = this.pegGrid?.[1]?.[1];
+        waypoints.push({ x: 227.5, y: 93.5, isPeg: true, peg: peg1 });
+        waypoints.push({ x: 236, y: 104, isPeg: false });
+        // Peg Hit 2: Row 2 peg at (277, 138) -> hits right shoulder, bounces outward right
+        const peg2 = this.pegGrid?.[2]?.[3];
+        waypoints.push({ x: 284.5, y: 126.5, isPeg: true, peg: peg2 });
+        waypoints.push({ x: 296, y: 138, isPeg: false });
+        // Sweep outward along outer right gutter
+        waypoints.push({ x: 335, y: 175, isPeg: false });
+        waypoints.push({ x: 380, y: 220, isPeg: false });
+        waypoints.push({ x: 412, y: 268, isPeg: false });
+        waypoints.push({ x: 422, y: 315, isPeg: false });
+        waypoints.push({ x: 422, y: slotTop, isPeg: false });
+        waypoints.push({ x: 422, y: settleY, isPeg: false });
+      }
+    } else {
+      // Normal Slot (0..8)
+      const s = Math.max(0, Math.min(slotCount - 1, Number(info.targetSlot !== undefined ? info.targetSlot : 4)));
+      const targetSlotX = outGutterW + (s + 0.5) * slotW;
+
+      // Binomial Galton board: 8 transitions from Row 1 down to Row 8.
+      // Total number of right bounces must be exactly s.
+      const choices = Array(s).fill(1).concat(Array(8 - s).fill(0));
+      // Shuffle with Fisher-Yates
+      for (let i = choices.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [choices[i], choices[j]] = [choices[j], choices[i]];
+      }
+
+      // Starting peg at Row 1 is the middle peg: j = 1 (at x=220, y=105)
+      let currentPegIdx = 1;
+
+      for (let r = 1; r <= 8; r++) {
+        const peg = this.pegGrid?.[r]?.[currentPegIdx];
+        const choice = choices[r - 1]; // 0 = bounce left, 1 = bounce right
+
+        if (peg) {
+          // Precise surface contact point (ballR 9.5 + pegR 5 = 14.5px separation):
+          // Hitting the left shoulder deflects left; hitting the right shoulder deflects right.
+          const contactX = choice === 0 ? peg.position.x - 7.5 : peg.position.x + 7.5;
+          const contactY = peg.position.y - 11.5;
+          waypoints.push({ x: contactX, y: contactY, isPeg: true, peg });
+
+          // Parabolic bounce apex immediately following contact:
+          const apexX = choice === 0 ? peg.position.x - 13.5 : peg.position.x + 13.5;
+          const apexY = peg.position.y - 2;
+          waypoints.push({ x: apexX, y: apexY, isPeg: false });
+        }
+
+        const nextPegIdx = choice === 1 ? currentPegIdx + 1 : currentPegIdx;
+        currentPegIdx = nextPegIdx;
+      }
+
+      // Guide into the target slot chute and settle deeply onto the card
+      waypoints.push({ x: targetSlotX, y: slotTop - 12, isPeg: false });
+      waypoints.push({ x: targetSlotX, y: slotTop + 15, isPeg: false });
+      waypoints.push({ x: targetSlotX, y: settleY, isPeg: false });
+    }
+
+    info.waypoints = waypoints;
+    info.wpIndex = 0;
+  }
+
+  triggerPegHit(ball, peg) {
+    if (!peg || !peg.plugin) return;
+    const pi = peg.plugin;
+    pi.flash = 1;
+    const info = ball.plugin;
+    info.hits = (info.hits || 0) + 1;
+
+    const derived = this.cb.getDerived();
+    const settings = this.cb.getSettings();
+    let kind = 'normal';
+
+    if (derived.bonusPegIds.has(pi.id) && !info.hitSpecials.has(pi.id)) {
+      info.hitSpecials.add(pi.id);
+      info.value += derived.bonusPegValue;
+      kind = 'bonus';
+    } else if (derived.multPegIds.has(pi.id) && !info.hitSpecials.has(pi.id)) {
+      info.hitSpecials.add(pi.id);
+      info.value *= derived.multPegFactor;
+      kind = 'mult';
+    }
+    info.value += derived.perHitValue;
+    info.flat += derived.flatPerHit;
+
+    if (settings.particles) this.burst(peg.position.x, peg.position.y, pi.color, kind === 'normal' ? 6 : 14);
+    this.cb.onPegHit({ x: peg.position.x, y: peg.position.y, kind, hits: info.hits });
   }
 
   resize() {
@@ -264,56 +388,11 @@ export class PlinkoEngine {
 
   // ----- physics events ---------------------------------------------------
   handleCollisions(e) {
-    for (const pair of e.pairs) {
-      const a = pair.bodyA;
-      const b = pair.bodyB;
-      const ball = a.label === 'ball' ? a : b.label === 'ball' ? b : null;
-      const peg = a.label === 'peg' ? a : b.label === 'peg' ? b : null;
-      if (ball && peg) this.onPegHit(ball, peg, pair);
-    }
+    // Collision events handled cleanly by deterministic waypoint system
   }
 
   onPegHit(ball, peg, pair) {
-    const info = ball.plugin;
-    const pi = peg.plugin;
-    pi.flash = 1;
-    info.hits++;
-
-    if (info.targetX !== undefined) {
-      const y = ball.position.y;
-      const { slotTop = 366, spawnX = 220 } = BOARD;
-      const t = Math.max(0, Math.min(1, (y - 30) / (slotTop - 45)));
-      const s = t * t * (3 - 2 * t);
-      const idealX = spawnX + (info.targetX - spawnX) * s;
-
-      // Peg bounce direction: bounce towards ideal trajectory
-      const dx = peg.position.x - idealX;
-      // If peg is to the right of idealX, bounce left; if peg is to the left, bounce right
-      const bounceDir = dx > 0 ? -1 : 1;
-
-      // Gentle lateral kick in the bounce direction (natural ricochet)
-      Body.applyForce(ball, ball.position, { x: bounceDir * 0.00018, y: 0 });
-    }
-
-    const derived = this.cb.getDerived();
-    const settings = this.cb.getSettings();
-    let kind = 'normal';
-
-    if (derived.bonusPegIds.has(pi.id) && !info.hitSpecials.has(pi.id)) {
-      info.hitSpecials.add(pi.id);
-      info.value += derived.bonusPegValue;
-      kind = 'bonus';
-    } else if (derived.multPegIds.has(pi.id) && !info.hitSpecials.has(pi.id)) {
-      info.hitSpecials.add(pi.id);
-      info.value *= derived.multPegFactor;
-      kind = 'mult';
-    }
-    info.value += derived.perHitValue;
-    info.flat += derived.flatPerHit;
-
-    const sp = pair.collision?.supports?.[0] || peg.position;
-    if (settings.particles) this.burst(sp.x, sp.y, pi.color, kind === 'normal' ? 6 : 14);
-    this.cb.onPegHit({ x: peg.position.x, y: peg.position.y, kind, hits: info.hits });
+    // Peg hits handled smoothly via triggerPegHit without rigid force conflicts
   }
 
   burst(x, y, color, count) {
@@ -333,15 +412,16 @@ export class PlinkoEngine {
   }
 
   finalize(ball) {
-    const { W, slotCount, settleY, outGutterW = 36 } = BOARD;
+    if (!ball || !this.balls.has(ball)) return;
+    const { W, slotCount, settleY = 410, outGutterW = 36 } = BOARD;
     const info = ball.plugin;
     const tier = info.tier || 0;
     const tierInfo = TIERS[tier] || TIERS[0];
     const x = ball.position.x;
     const betId = info.orderid || info.betId;
 
-    // Check if outcome is OUT (server dictated isOut or physical gutter entry)
-    const isOut = Boolean(info.isOut || x < outGutterW || x > W - outGutterW);
+    // Check if outcome is OUT: matches response isOut flag or physical gutter
+    const isOut = Boolean(info.isOut || info.targetSlot === -1 || x < outGutterW || x > W - outGutterW);
 
     if (isOut) {
       this.burst(x, settleY, '#EF4444', 20);
@@ -354,105 +434,102 @@ export class PlinkoEngine {
     const slotAreaW = W - outGutterW * 2;
     const slotW = slotAreaW / slotCount;
     const calculatedSlot = Math.max(0, Math.min(slotCount - 1, Math.floor((x - outGutterW) / slotW)));
-    // If server sent a target_slot, guarantee that exact slot outcome
     const slot = info.targetSlot !== undefined && info.targetSlot >= 0 ? info.targetSlot : calculatedSlot;
 
     this.burst(x, settleY, tierInfo.color || '#FFC94A', 22);
     Composite.remove(this.engine.world, ball);
     this.balls.delete(ball);
-    this.cb.onSettle({ slot, targetMult: info.targetMult, value: info.value, flat: info.flat, free: info.free, tier, bet: info.bet || 0, betId, x });
+    this.cb.onSettle({
+      slot,
+      targetMult: info.targetMult,
+      value: info.value,
+      flat: info.flat,
+      free: info.free,
+      tier,
+      bet: info.bet || 0,
+      betId,
+      x,
+    });
   }
 
   afterStep() {
     const now = performance.now();
-    const { W, slotTop = 366, spawnX = 220, outGutterW = 36, slotCount = 9 } = BOARD;
-    const slotAreaW = W - outGutterW * 2;
-    const slotW = slotAreaW / slotCount;
+    const { settleY = 410 } = BOARD;
 
     for (const ball of [...this.balls]) {
       const info = ball.plugin;
-      const y = ball.position.y;
-      const x = ball.position.x;
+      if (!info) continue;
 
-      if (info.targetX !== undefined) {
-        if (y < slotTop) {
-          // Cubic smoothstep curve from spawnX (220) to targetX over the entire fall
-          const t = Math.max(0, Math.min(1, (y - 30) / (slotTop - 45)));
-          const s = t * t * (3 - 2 * t);
-          let idealX = spawnX + (info.targetX - spawnX) * s;
+      if (!info.waypoints || info.waypoints.length === 0) {
+        this.buildPathForBall(ball);
+      }
 
-          // As ball approaches slot entrance (y > slotTop - 40):
-          // Repel away from red divider boundaries at 36 and 404 so ball never lands on divider edge
-          if (y > slotTop - 40) {
-            if (Math.abs(x - outGutterW) < 7) {
-              idealX = info.targetX < outGutterW ? outGutterW - 8 : outGutterW + 8;
-            } else if (Math.abs(x - (W - outGutterW)) < 7) {
-              idealX = info.targetX > W - outGutterW ? (W - outGutterW) + 8 : (W - outGutterW) - 8;
-            }
+      const waypoints = info.waypoints;
+      let wpIndex = info.wpIndex || 0;
+
+      // Advance waypoints if reached or passed
+      while (wpIndex < waypoints.length) {
+        const wp = waypoints[wpIndex];
+        const dx = wp.x - ball.position.x;
+        const dy = wp.y - ball.position.y;
+        const dist = Math.hypot(dx, dy);
+
+        const passedY = ball.position.y >= wp.y && Math.abs(dx) < 14;
+        if (dist < 8 || passedY) {
+          if (wp.isPeg && wp.peg && !wp.triggered) {
+            wp.triggered = true;
+            this.triggerPegHit(ball, wp.peg);
           }
-
-          const diffX = idealX - x;
-          const targetVx = Math.max(-1.5, Math.min(1.5, diffX * 0.12));
-          Body.setVelocity(ball, {
-            x: ball.velocity.x + (targetVx - ball.velocity.x) * 0.12,
-            y: Math.min(2.8, Math.max(1.0, ball.velocity.y)),
-          });
+          wpIndex++;
+          info.wpIndex = wpIndex;
         } else {
-          // Inside slot chute (y >= slotTop):
-          // LOCK channel centering to whichever channel the ball entered physically.
-          // NEVER steer across a divider wall!
-          let channelCenterX;
-          if (x < outGutterW) {
-            channelCenterX = outGutterW * 0.5; // Left OUT gutter
-            info.isOut = true;
-          } else if (x > W - outGutterW) {
-            channelCenterX = W - outGutterW * 0.5; // Right OUT gutter
-            info.isOut = true;
-          } else {
-            const currentSlot = Math.max(0, Math.min(slotCount - 1, Math.floor((x - outGutterW) / slotW)));
-            channelCenterX = outGutterW + (currentSlot + 0.5) * slotW;
-          }
-
-          const diffX = channelCenterX - x;
-          // Smooth, non-stopping downward slide into slot pocket
-          const targetVy = Math.min(3.0, Math.max(2.0, ball.velocity.y || 2.0));
-          Body.setVelocity(ball, {
-            x: diffX * 0.18,
-            y: targetVy,
-          });
+          break;
         }
       }
 
-      // Speed limits: calm realistic motion, strictly prevents rushing
-      const curSpeed = Math.hypot(ball.velocity.x, ball.velocity.y);
-      if (curSpeed > 3.4) {
-        Body.setVelocity(ball, {
-          x: (ball.velocity.x / curSpeed) * 3.4,
-          y: (ball.velocity.y / curSpeed) * 3.4,
-        });
+      if (wpIndex >= waypoints.length || ball.position.y >= settleY || now - info.born > 16000) {
+        this.finalize(ball);
+        continue;
       }
+
+      const curWp = waypoints[wpIndex];
+      const dx = curWp.x - ball.position.x;
+      const dy = curWp.y - ball.position.y;
+      const dist = Math.hypot(dx, dy) || 1;
+
+      // Calm, enjoyable arcade drop speed (~2.2 px per step)
+      const speed = 2.2;
+      const targetVx = (dx / dist) * speed;
+      const targetVy = Math.max(0.7, (dy / dist) * speed);
+
+      // Smooth blend rate gives natural inertia feel with zero jitter
+      Body.setVelocity(ball, {
+        x: ball.velocity.x + (targetVx - ball.velocity.x) * 0.38,
+        y: ball.velocity.y + (targetVy - ball.velocity.y) * 0.38,
+      });
 
       info.trail.push({ x: ball.position.x, y: ball.position.y });
       if (info.trail.length > 14) info.trail.shift();
+    }
 
-      // Robust anti-stuck detection: if ball position hasn't moved for 16 physics steps
-      if (info.lastX !== undefined && info.lastY !== undefined) {
-        const movedDist = Math.hypot(x - info.lastX, y - info.lastY);
-        if (movedDist < 0.25) {
-          info.stuck = (info.stuck || 0) + 1;
-          if (info.stuck > 16) {
-            const nudgeX = x < outGutterW ? -0.8 : x > W - outGutterW ? 0.8 : (x < W / 2 ? 0.8 : -0.8);
-            Body.setVelocity(ball, { x: nudgeX, y: 2.6 });
-            info.stuck = 0;
-          }
-        } else {
-          info.stuck = 0;
+    // Soft ball-to-ball collision repulsion so balls realistically interact and never pass through each other
+    const activeBalls = [...this.balls];
+    const minDist = (BOARD.ballR || 9.5) * 2;
+    for (let i = 0; i < activeBalls.length; i++) {
+      for (let j = i + 1; j < activeBalls.length; j++) {
+        const b1 = activeBalls[i];
+        const b2 = activeBalls[j];
+        const dx = b2.position.x - b1.position.x;
+        const dy = b2.position.y - b1.position.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist > 0.1 && dist < minDist) {
+          const overlap = (minDist - dist) * 0.5;
+          const nx = dx / dist;
+          const ny = dy / dist;
+          Body.setPosition(b1, { x: b1.position.x - nx * overlap * 0.35, y: b1.position.y - ny * overlap * 0.35 });
+          Body.setPosition(b2, { x: b2.position.x + nx * overlap * 0.35, y: b2.position.y + ny * overlap * 0.35 });
         }
       }
-      info.lastX = x;
-      info.lastY = y;
-
-      if (ball.position.y > BOARD.settleY || now - info.born > 18000) this.finalize(ball);
     }
   }
 
