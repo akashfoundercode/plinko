@@ -788,10 +788,12 @@ export class PlinkoEngine {
   drawRealisticMoon(ctx, mx, my, moonR, t) {
     const pulse = 0.94 + 0.06 * Math.sin(t * 1.5);
 
-    // Full 12-phase astronomical lunar cycle (~32 seconds per full lunar month)
-    // Phases: New Moon -> Waxing Crescent I & II -> First Quarter -> Waxing Gibbous I & II
-    // -> Full Moon -> Waning Gibbous I & II -> Third Quarter -> Waning Crescent I & II (Balsamic)
-    const phi = (t * 0.196) % (Math.PI * 2);
+    // Full 12-phase astronomical lunar cycle
+    // Har phase change hone me 1 minute (60 seconds) ka samay lagta hai
+    const SECONDS_PER_PHASE = 60; // 1 minute to transition to the next phase
+    const TOTAL_CYCLE_SECONDS = SECONDS_PER_PHASE * 12; // 720s for full 12-phase cycle
+    const initialPhase = Math.PI / 3; // start at visible Waxing Crescent II upon load
+    const phi = (initialPhase + (t / TOTAL_CYCLE_SECONDS) * (Math.PI * 2)) % (Math.PI * 2);
     const illumination = (1 - Math.cos(phi)) / 2; // 0.0 (New Moon) to 1.0 (Full Moon)
 
     // Check if user's Detailed Full Moon Cutout image is loaded
