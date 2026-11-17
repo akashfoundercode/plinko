@@ -34,6 +34,7 @@ export class PlinkoEngine {
     this.scale = 1;
     this.meteors = [];
     this.nextMeteorTime = 1.0;
+    this.cachedMoon = null;
 
     // Generate twinkling & blinking stars on the outer sides (open cosmic sky)
     const stars = [];
@@ -235,9 +236,14 @@ export class PlinkoEngine {
     const rect = this.canvas.getBoundingClientRect();
     const cssW = rect.width || BOARD.W;
     const cssH = rect.height || (cssW * BOARD.H) / BOARD.W;
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    this.canvas.width = Math.round(cssW * dpr);
-    this.canvas.height = Math.round(cssH * dpr);
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+    // Cap mobile DPR at 1.5 to maintain retina clarity while preventing GPU fillrate lag
+    const dpr = isMobile ? Math.min(1.5, window.devicePixelRatio || 1) : Math.min(2, window.devicePixelRatio || 1);
+    const targetW = Math.round(cssW * dpr);
+    const targetH = Math.round(cssH * dpr);
+    if (this.canvas.width === targetW && this.canvas.height === targetH) return;
+    this.canvas.width = targetW;
+    this.canvas.height = targetH;
     this.scale = this.canvas.width / BOARD.W;
   }
 
@@ -363,14 +369,14 @@ export class PlinkoEngine {
           const targetVx = Math.max(-1.5, Math.min(1.5, diffX * 0.10));
           Body.setVelocity(ball, {
             x: ball.velocity.x + (targetVx - ball.velocity.x) * 0.10,
-            y: ball.velocity.y,
+            y: Math.max(1.15, ball.velocity.y), // guarantee smooth downward momentum, never stall on pegs
           });
         } else {
           // Inside slot chute (y >= slotTop): smoothly glide straight down onto the multiplier card
           const diffX = info.targetX - x;
           Body.setVelocity(ball, {
             x: diffX * 0.12,
-            y: Math.min(3.6, Math.max(2.0, ball.velocity.y)),
+            y: Math.min(3.8, Math.max(2.2, ball.velocity.y)),
           });
         }
       }
@@ -405,19 +411,19 @@ export class PlinkoEngine {
   // ----- main loop --------------------------------------------------------
   tick(ts) {
     if (!this.running) return;
-    const dt = Math.min(64, ts - (this.last || ts));
+    const dt = Math.min(35, ts - (this.last || ts));
     this.last = ts;
     this.time += dt / 1000;
 
     if (!this.paused) {
-      this.acc += dt;
+      this.acc = Math.min(this.acc + dt, 35);
       let n = 0;
-      while (this.acc >= STEP_MS && n < 8) {
+      while (this.acc >= STEP_MS && n < 4) {
         Engine.update(this.engine, STEP_MS);
+        this.afterStep();
         this.acc -= STEP_MS;
         n++;
       }
-      this.afterStep();
     }
 
     for (const p of this.pegs) if (p.plugin.flash > 0) p.plugin.flash = Math.max(0, p.plugin.flash - dt / 280);
@@ -630,14 +636,21 @@ export class PlinkoEngine {
       const isBonus = derived.bonusPegIds.has(id);
       const isMult = derived.multPegIds.has(id);
 
-      ctx.save();
-      ctx.shadowColor = color;
-      ctx.shadowBlur = 8 + flash * 18;
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.arc(x, y, pegR + flash * 1.5, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
+      if (flash > 0) {
+        ctx.save();
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 8 + flash * 16;
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(x, y, pegR + flash * 1.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      } else {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(x, y, pegR, 0, Math.PI * 2);
+        ctx.fill();
+      }
 
       ctx.fillStyle = 'rgba(255,255,255,0.55)';
       ctx.beginPath();
@@ -785,6 +798,16 @@ export class PlinkoEngine {
     const hasImage = moonImg && moonImg.complete && moonImg.naturalWidth > 0;
 
     if (hasImage) {
+      if (!this.cachedMoon) {
+        const mc = document.createElement('canvas');
+        mc.width = 128;
+        mc.height = 128;
+        const mctx = mc.getContext('2d');
+        mctx.drawImage(moonImg, 0, 0, 128, 128);
+        this.cachedMoon = mc;
+      }
+      const moonSrc = this.cachedMoon || moonImg;
+
       // 1. Faint Earthshine on the full moon disk ("shadow wale me ekdam zara sa visible rahe moon")
       // Subtle ghost silhouette (opacity 0.08) with zero stroke line so no artificial border appears
       ctx.save();
@@ -792,7 +815,7 @@ export class PlinkoEngine {
       ctx.arc(mx, my, moonR, 0, Math.PI * 2);
       ctx.clip();
       ctx.globalAlpha = 0.08;
-      ctx.drawImage(moonImg, mx - moonR, my - moonR, moonR * 2, moonR * 2);
+      ctx.drawImage(moonSrc, mx - moonR, my - moonR, moonR * 2, moonR * 2);
       ctx.restore();
 
       // 2. Radiant Lunar Glow on the VISIBLE SHAPE ONLY (zero glow on the shadow side)
@@ -816,7 +839,7 @@ export class PlinkoEngine {
 
         // Real moon cutout drawn at full opacity - crisp craters and textures
         ctx.globalAlpha = 1.0;
-        ctx.drawImage(moonImg, mx - moonR, my - moonR, moonR * 2, moonR * 2);
+        ctx.drawImage(moonSrc, mx - moonR, my - moonR, moonR * 2, moonR * 2);
 
         // Luminous warm moonlight radiance overlay on the visible surface
         const glowOffsetX = phi < Math.PI ? moonR * 0.35 : -moonR * 0.35;
