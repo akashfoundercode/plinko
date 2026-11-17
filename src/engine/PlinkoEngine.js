@@ -7,7 +7,7 @@ moonImg.src = moonImgSrc;
 
 const { Engine, Bodies, Body, Composite, Events } = Matter;
 const rand = (a, b) => a + Math.random() * (b - a);
-const STEP_MS = 1000 / 120; // fixed physics step (120 Hz) for stable collisions
+const STEP_MS = 1000 / 60; // fixed physics step (60 Hz) for smooth, non-stuttering mobile & desktop physics
 
 /**
  * Framework-free Plinko engine: Matter.js physics + Canvas 2D rendering.
@@ -118,20 +118,35 @@ export class PlinkoEngine {
     const slotAreaW = W - outGutterW * 2;
     const slotW = slotAreaW / slotCount;
 
-    // Dividers separating OUT gutters from the 9 slots
+    // Dividers separating OUT gutters from the 9 slots (frictionless so balls never stick or halt)
     statics.push(
-      Bodies.rectangle(outGutterW, slotTop + (H - slotTop) / 2, 4, H - slotTop, { isStatic: true, restitution: 0.5, label: 'divider' }),
-      Bodies.circle(outGutterW, slotTop, 3.5, { isStatic: true, restitution: 0.6, label: 'divider' }),
-      Bodies.rectangle(W - outGutterW, slotTop + (H - slotTop) / 2, 4, H - slotTop, { isStatic: true, restitution: 0.5, label: 'divider' }),
-      Bodies.circle(W - outGutterW, slotTop, 3.5, { isStatic: true, restitution: 0.6, label: 'divider' })
+      Bodies.rectangle(outGutterW, slotTop + (H - slotTop) / 2, 3, H - slotTop, {
+        isStatic: true,
+        friction: 0,
+        frictionStatic: 0,
+        restitution: 0.2,
+        label: 'divider',
+      }),
+      Bodies.rectangle(W - outGutterW, slotTop + (H - slotTop) / 2, 3, H - slotTop, {
+        isStatic: true,
+        friction: 0,
+        frictionStatic: 0,
+        restitution: 0.2,
+        label: 'divider',
+      })
     );
 
     // Inner dividers between the 9 slots
     for (let k = 1; k < slotCount; k++) {
       const x = outGutterW + k * slotW;
       statics.push(
-        Bodies.rectangle(x, slotTop + (H - slotTop) / 2, 4, H - slotTop, { isStatic: true, restitution: 0.5, label: 'divider' }),
-        Bodies.circle(x, slotTop, 3.5, { isStatic: true, restitution: 0.6, label: 'divider' })
+        Bodies.rectangle(x, slotTop + (H - slotTop) / 2, 3, H - slotTop, {
+          isStatic: true,
+          friction: 0,
+          frictionStatic: 0,
+          restitution: 0.2,
+          label: 'divider',
+        })
       );
     }
     Composite.add(world, statics);
@@ -326,7 +341,7 @@ export class PlinkoEngine {
     const betId = info.orderid || info.betId;
 
     // Check if outcome is OUT (server dictated isOut or physical gutter entry)
-    const isOut = info.isOut !== undefined ? info.isOut : (x < outGutterW || x > W - outGutterW);
+    const isOut = Boolean(info.isOut || x < outGutterW || x > W - outGutterW);
 
     if (isOut) {
       this.burst(x, settleY, '#EF4444', 20);
@@ -350,7 +365,9 @@ export class PlinkoEngine {
 
   afterStep() {
     const now = performance.now();
-    const { slotTop = 366, spawnX = 220 } = BOARD;
+    const { W, slotTop = 366, spawnX = 220, outGutterW = 36, slotCount = 9 } = BOARD;
+    const slotAreaW = W - outGutterW * 2;
+    const slotW = slotAreaW / slotCount;
 
     for (const ball of [...this.balls]) {
       const info = ball.plugin;
@@ -362,49 +379,80 @@ export class PlinkoEngine {
           // Cubic smoothstep curve from spawnX (220) to targetX over the entire fall
           const t = Math.max(0, Math.min(1, (y - 30) / (slotTop - 45)));
           const s = t * t * (3 - 2 * t);
-          const idealX = spawnX + (info.targetX - spawnX) * s;
+          let idealX = spawnX + (info.targetX - spawnX) * s;
+
+          // As ball approaches slot entrance (y > slotTop - 40):
+          // Repel away from red divider boundaries at 36 and 404 so ball never lands on divider edge
+          if (y > slotTop - 40) {
+            if (Math.abs(x - outGutterW) < 7) {
+              idealX = info.targetX < outGutterW ? outGutterW - 8 : outGutterW + 8;
+            } else if (Math.abs(x - (W - outGutterW)) < 7) {
+              idealX = info.targetX > W - outGutterW ? (W - outGutterW) + 8 : (W - outGutterW) - 8;
+            }
+          }
 
           const diffX = idealX - x;
-          // Target horizontal speed with smooth velocity steering (calm, steady, natural fall)
-          const targetVx = Math.max(-1.4, Math.min(1.4, diffX * 0.10));
+          const targetVx = Math.max(-1.5, Math.min(1.5, diffX * 0.12));
           Body.setVelocity(ball, {
-            x: ball.velocity.x + (targetVx - ball.velocity.x) * 0.10,
-            y: Math.min(2.8, Math.max(0.9, ball.velocity.y)), // calm downward momentum, no stalling & no rushing
+            x: ball.velocity.x + (targetVx - ball.velocity.x) * 0.12,
+            y: Math.min(2.8, Math.max(1.0, ball.velocity.y)),
           });
         } else {
-          // Inside slot chute (y >= slotTop): gently descend all the way down into the pocket onto the card
-          const diffX = info.targetX - x;
+          // Inside slot chute (y >= slotTop):
+          // LOCK channel centering to whichever channel the ball entered physically.
+          // NEVER steer across a divider wall!
+          let channelCenterX;
+          if (x < outGutterW) {
+            channelCenterX = outGutterW * 0.5; // Left OUT gutter
+            info.isOut = true;
+          } else if (x > W - outGutterW) {
+            channelCenterX = W - outGutterW * 0.5; // Right OUT gutter
+            info.isOut = true;
+          } else {
+            const currentSlot = Math.max(0, Math.min(slotCount - 1, Math.floor((x - outGutterW) / slotW)));
+            channelCenterX = outGutterW + (currentSlot + 0.5) * slotW;
+          }
+
+          const diffX = channelCenterX - x;
+          // Smooth, non-stopping downward slide into slot pocket
+          const targetVy = Math.min(3.0, Math.max(2.0, ball.velocity.y || 2.0));
           Body.setVelocity(ball, {
-            x: diffX * 0.14,
-            y: 1.1, // calm, realistic descent speed (not fast, no sudden touch completion)
+            x: diffX * 0.18,
+            y: targetVy,
           });
         }
       }
 
       // Speed limits: calm realistic motion, strictly prevents rushing
       const curSpeed = Math.hypot(ball.velocity.x, ball.velocity.y);
-      if (curSpeed > 3.2) {
+      if (curSpeed > 3.4) {
         Body.setVelocity(ball, {
-          x: (ball.velocity.x / curSpeed) * 3.2,
-          y: (ball.velocity.y / curSpeed) * 3.2,
+          x: (ball.velocity.x / curSpeed) * 3.4,
+          y: (ball.velocity.y / curSpeed) * 3.4,
         });
       }
 
       info.trail.push({ x: ball.position.x, y: ball.position.y });
       if (info.trail.length > 14) info.trail.shift();
 
-      // Anti-stuck nudge if the ball balances on a peg.
-      if (curSpeed < 0.15) {
-        info.stuck++;
-        if (info.stuck > 35) {
-          Body.setVelocity(ball, { x: rand(-1.2, 1.2), y: 0.6 });
+      // Robust anti-stuck detection: if ball position hasn't moved for 16 physics steps
+      if (info.lastX !== undefined && info.lastY !== undefined) {
+        const movedDist = Math.hypot(x - info.lastX, y - info.lastY);
+        if (movedDist < 0.25) {
+          info.stuck = (info.stuck || 0) + 1;
+          if (info.stuck > 16) {
+            const nudgeX = x < outGutterW ? -0.8 : x > W - outGutterW ? 0.8 : (x < W / 2 ? 0.8 : -0.8);
+            Body.setVelocity(ball, { x: nudgeX, y: 2.6 });
+            info.stuck = 0;
+          }
+        } else {
           info.stuck = 0;
         }
-      } else {
-        info.stuck = 0;
       }
+      info.lastX = x;
+      info.lastY = y;
 
-      if (ball.position.y > BOARD.settleY || now - info.born > 20000) this.finalize(ball);
+      if (ball.position.y > BOARD.settleY || now - info.born > 18000) this.finalize(ball);
     }
   }
 
@@ -416,7 +464,7 @@ export class PlinkoEngine {
     this.time += dt / 1000;
 
     if (!this.paused) {
-      this.acc = Math.min(this.acc + dt, 35);
+      this.acc = Math.min(this.acc + dt, 80);
       let n = 0;
       while (this.acc >= STEP_MS && n < 4) {
         Engine.update(this.engine, STEP_MS);
