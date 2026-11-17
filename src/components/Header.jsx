@@ -131,14 +131,6 @@ export default function Header() {
           </button>
         )}
 
-        {/* SP Pill: visible on medium screens up */}
-        <CurrencyPill
-          label="SHOP PTS"
-          value={state.sp}
-          variant="sp"
-          className="hidden md:flex"
-        />
-
         <motion.button
           type="button"
           whileTap={{ scale: 0.9 }}

@@ -1,5 +1,9 @@
 import Matter from 'matter-js';
 import { BOARD, ROW_COLORS, TIERS } from '../config/gameConfig';
+import moonImgSrc from '../assets/images/Detailed full Moon Cutout.png';
+
+const moonImg = new Image();
+moonImg.src = moonImgSrc;
 
 const { Engine, Bodies, Body, Composite, Events } = Matter;
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -28,12 +32,14 @@ export class PlinkoEngine {
     this.acc = 0;
     this.last = 0;
     this.scale = 1;
+    this.meteors = [];
+    this.nextMeteorTime = 1.0;
 
-    // Generate stars only on the outer sides (open sky), keeping the peg triangle clean
+    // Generate twinkling & blinking stars on the outer sides (open cosmic sky)
     const stars = [];
     const centerX = BOARD.W / 2;
     let attempts = 0;
-    while (stars.length < 80 && attempts < 1000) {
+    while (stars.length < 110 && attempts < 1400) {
       attempts++;
       const x = Math.random() * BOARD.W;
       const y = Math.random() * (BOARD.slotTop - 15);
@@ -50,13 +56,22 @@ export class PlinkoEngine {
         insideBallZone = true;
       }
 
+      // Keep stars away from the moon zone (no stars over the moon)
+      const distToMoon = Math.hypot(x - (BOARD.W - 58), y - 48);
+      if (distToMoon < 40) {
+        continue;
+      }
+
       if (!insideBallZone) {
+        const color = Math.random() < 0.22 ? '#FEF08A' : Math.random() < 0.2 ? '#BAE6FD' : '#FFFFFF';
         stars.push({
           x,
           y,
-          r: rand(0.4, 1.6),
+          r: rand(0.5, 1.8),
           phase: rand(0, 6.28),
-          speed: rand(0.6, 2.2),
+          speed: rand(1.4, 3.4), // brisk natural twinkling & blinking
+          baseAlpha: rand(0.12, 0.4),
+          color,
         });
       }
     }
@@ -407,6 +422,7 @@ export class PlinkoEngine {
 
     for (const p of this.pegs) if (p.plugin.flash > 0) p.plugin.flash = Math.max(0, p.plugin.flash - dt / 280);
     this.updateParticles(dt / 1000);
+    this.updateMeteors(dt / 1000);
     this.render();
     this.raf = requestAnimationFrame(this.tick);
   }
@@ -419,6 +435,40 @@ export class PlinkoEngine {
       p.y += p.vy * dt;
     }
     this.particles = this.particles.filter((p) => p.life > 0);
+  }
+
+  updateMeteors(dt) {
+    // Periodically spawn a meteoroid across the night sky
+    if (this.time >= this.nextMeteorTime) {
+      this.nextMeteorTime = this.time + rand(3.0, 6.5);
+      const fromLeft = Math.random() < 0.6;
+      const startX = fromLeft ? rand(10, 150) : rand(BOARD.W - 150, BOARD.W - 10);
+      const startY = rand(10, 75);
+      const speed = rand(220, 320);
+      const angle = fromLeft ? rand(0.55, 0.85) : rand(2.25, 2.55); // angled diagonal descent
+      this.meteors.push({
+        x: startX,
+        y: startY,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        len: rand(35, 60),
+        life: 0,
+        maxLife: rand(0.65, 1.05),
+        width: rand(1.2, 2.0),
+        color: Math.random() < 0.5 ? '#fed7aa' : '#bae6fd',
+      });
+    }
+
+    // Advance and reap active meteoroids
+    for (let i = this.meteors.length - 1; i >= 0; i--) {
+      const m = this.meteors[i];
+      m.life += dt;
+      m.x += m.vx * dt;
+      m.y += m.vy * dt;
+      if (m.life >= m.maxLife || m.x < -50 || m.x > BOARD.W + 50 || m.y > BOARD.H) {
+        this.meteors.splice(i, 1);
+      }
+    }
   }
 
   // ----- rendering --------------------------------------------------------
@@ -434,42 +484,85 @@ export class PlinkoEngine {
     ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
     ctx.clearRect(0, 0, W, H);
 
-    // Background gradient
+    // Deep cosmic background
     const bg = ctx.createLinearGradient(0, 0, 0, H);
-    bg.addColorStop(0, '#2B1B66');
-    bg.addColorStop(0.45, '#1A1448');
-    bg.addColorStop(1, '#0C0C22');
+    bg.addColorStop(0, '#2D1B69');
+    bg.addColorStop(0.35, '#1B1449');
+    bg.addColorStop(0.7, '#110C2E');
+    bg.addColorStop(1, '#080517');
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, W, H);
 
-    // Twinkling stars
-    ctx.fillStyle = '#fff';
+    // Twinkling & blinking animated stars (excluding moon area)
+    const moonX = W - 58;
+    const moonY = 48;
     for (const s of this.stars) {
-      ctx.globalAlpha = 0.25 + 0.6 * (0.5 + 0.5 * Math.sin(t * s.speed + s.phase));
+      if (Math.hypot(s.x - moonX, s.y - moonY) < 40) continue;
+      const sinVal = Math.sin(t * s.speed + s.phase);
+      const blink = Math.pow(Math.max(0, sinVal), 2.2); // sharp twinkling blink
+      const alpha = s.baseAlpha + (1 - s.baseAlpha) * blink;
+
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = s.color || '#ffffff';
       ctx.beginPath();
-      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.arc(s.x, s.y, s.r * (0.85 + 0.35 * blink), 0, Math.PI * 2);
       ctx.fill();
+
+      // Delicate 4-point sparkle cross flare on bright stars
+      if (s.r >= 1.2 && blink > 0.65) {
+        ctx.save();
+        ctx.globalAlpha = (blink - 0.65) * 2.0;
+        ctx.strokeStyle = s.color || '#ffffff';
+        ctx.lineWidth = 0.65;
+        const fl = s.r * 2.6;
+        ctx.beginPath();
+        ctx.moveTo(s.x - fl, s.y);
+        ctx.lineTo(s.x + fl, s.y);
+        ctx.moveTo(s.x, s.y - fl);
+        ctx.lineTo(s.x, s.y + fl);
+        ctx.stroke();
+        ctx.restore();
+      }
     }
     ctx.globalAlpha = 1;
 
-    // Moon with glow
-    const mx = W - 52;
-    const my = 56;
-    const glow = ctx.createRadialGradient(mx, my, 6, mx, my, 70);
-    glow.addColorStop(0, 'rgba(255,233,184,0.55)');
-    glow.addColorStop(1, 'rgba(255,233,184,0)');
-    ctx.fillStyle = glow;
-    ctx.fillRect(mx - 80, my - 80, 160, 160);
-    ctx.fillStyle = '#FFEBC0';
-    ctx.beginPath();
-    ctx.arc(mx, my, 22, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = 'rgba(200,160,110,0.45)';
-    [[-7, -5, 4], [6, 4, 5], [-2, 9, 3]].forEach(([dx, dy, r]) => {
+    // Animated shooting meteoroids
+    for (const m of this.meteors) {
+      const progress = m.life / m.maxLife;
+      const alpha = Math.sin(progress * Math.PI);
+      if (alpha <= 0.01) continue;
+
+      const spd = Math.hypot(m.vx, m.vy) || 1;
+      const tailX = m.x - (m.vx / spd) * m.len;
+      const tailY = m.y - (m.vy / spd) * m.len;
+
+      const grad = ctx.createLinearGradient(tailX, tailY, m.x, m.y);
+      grad.addColorStop(0, 'rgba(255, 255, 255, 0)');
+      grad.addColorStop(0.7, m.color + '88');
+      grad.addColorStop(1, '#ffffff');
+
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = m.width;
+      ctx.lineCap = 'round';
       ctx.beginPath();
-      ctx.arc(mx + dx, my + dy, r, 0, Math.PI * 2);
+      ctx.moveTo(tailX, tailY);
+      ctx.lineTo(m.x, m.y);
+      ctx.stroke();
+
+      // Glowing meteor head
+      ctx.shadowColor = m.color;
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, m.width * 1.25, 0, Math.PI * 2);
       ctx.fill();
-    });
+      ctx.restore();
+    }
+
+    // Photorealistic Celestial Half-Moon with Earthshine (Full Circle with faint visibility + Real Lunar Surface)
+    this.drawRealisticMoon(ctx, W - 58, 48, 28, t);
 
     // Drop indicator (bobbing arrow)
     const bob = Math.sin(t * 4) * 3;
@@ -641,5 +734,244 @@ export class PlinkoEngine {
       ctx.fill();
     }
     ctx.globalAlpha = 1;
+  }
+
+  // Helper to build the exact astronomical 12-phase lunar clipping path
+  buildMoonPhasePath(ctx, mx, my, moonR, phi) {
+    ctx.beginPath();
+    const isWaxing = phi < Math.PI;
+    const cosPhi = Math.cos(phi);
+    const rx = Math.max(0.15, Math.abs(cosPhi) * moonR);
+
+    if (isWaxing) {
+      // Waxing phases (0 -> PI):
+      // Outer illuminated limb is on the RIGHT semicircle (from top pole -PI/2 down to bottom pole PI/2)
+      ctx.arc(mx, my, moonR, -Math.PI / 2, Math.PI / 2, false);
+      // Terminator: ellipse from bottom pole (PI/2) back up to top pole (-PI/2)
+      if (cosPhi >= 0) {
+        // Waxing Crescent: terminator bows right
+        ctx.ellipse(mx, my, rx, moonR, 0, Math.PI / 2, -Math.PI / 2, true);
+      } else {
+        // Waxing Gibbous: terminator bows left
+        ctx.ellipse(mx, my, rx, moonR, 0, Math.PI / 2, 3 * Math.PI / 2, false);
+      }
+    } else {
+      // Waning phases (PI -> 2*PI):
+      // Outer illuminated limb is on the LEFT semicircle (from bottom pole PI/2 up to top pole 3*PI/2)
+      ctx.arc(mx, my, moonR, Math.PI / 2, 3 * Math.PI / 2, false);
+      // Terminator: ellipse from top pole (-PI/2) back down to bottom pole (PI/2)
+      if (cosPhi < 0) {
+        // Waning Gibbous: terminator bows right
+        ctx.ellipse(mx, my, rx, moonR, 0, -Math.PI / 2, Math.PI / 2, false);
+      } else {
+        // Waning Crescent (Balsamic): terminator bows left
+        ctx.ellipse(mx, my, rx, moonR, 0, -Math.PI / 2, Math.PI / 2, true);
+      }
+    }
+    ctx.closePath();
+  }
+
+  // ----- Realistic Celestial Moon Rendering --------------------------------
+  drawRealisticMoon(ctx, mx, my, moonR, t) {
+    const pulse = 0.94 + 0.06 * Math.sin(t * 1.5);
+
+    // Full 12-phase astronomical lunar cycle (~32 seconds per full lunar month)
+    // Phases: New Moon -> Waxing Crescent I & II -> First Quarter -> Waxing Gibbous I & II
+    // -> Full Moon -> Waning Gibbous I & II -> Third Quarter -> Waning Crescent I & II (Balsamic)
+    const phi = (t * 0.196) % (Math.PI * 2);
+    const illumination = (1 - Math.cos(phi)) / 2; // 0.0 (New Moon) to 1.0 (Full Moon)
+
+    // Check if user's Detailed Full Moon Cutout image is loaded
+    const hasImage = moonImg && moonImg.complete && moonImg.naturalWidth > 0;
+
+    if (hasImage) {
+      // 1. Faint Earthshine on the full moon disk ("shadow wale me ekdam zara sa visible rahe moon")
+      // Subtle ghost silhouette (opacity 0.08) with zero stroke line so no artificial border appears
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(mx, my, moonR, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.globalAlpha = 0.08;
+      ctx.drawImage(moonImg, mx - moonR, my - moonR, moonR * 2, moonR * 2);
+      ctx.restore();
+
+      // 2. Radiant Lunar Glow on the VISIBLE SHAPE ONLY (zero glow on the shadow side)
+      // "moon me glow ness lao jo moon dhikh shadow wal nhi"
+      if (illumination > 0.03) {
+        ctx.save();
+        this.buildMoonPhasePath(ctx, mx, my, moonR, phi);
+
+        ctx.shadowColor = 'rgba(255, 250, 225, 0.92)';
+        ctx.shadowBlur = (14 + 14 * illumination) * pulse;
+        ctx.fillStyle = `rgba(255, 248, 225, ${(0.14 + 0.18 * illumination) * pulse})`;
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // 2. Illuminated Moon Phase (Clipped to exact 12-phase astronomical shape)
+      if (illumination > 0.015) {
+        ctx.save();
+        this.buildMoonPhasePath(ctx, mx, my, moonR, phi);
+        ctx.clip();
+
+        // Real moon cutout drawn at full opacity - crisp craters and textures
+        ctx.globalAlpha = 1.0;
+        ctx.drawImage(moonImg, mx - moonR, my - moonR, moonR * 2, moonR * 2);
+
+        // Luminous warm moonlight radiance overlay on the visible surface
+        const glowOffsetX = phi < Math.PI ? moonR * 0.35 : -moonR * 0.35;
+        const moonGlow = ctx.createRadialGradient(
+          mx + glowOffsetX, my, 2,
+          mx, my, moonR * 1.2
+        );
+        moonGlow.addColorStop(0, 'rgba(255, 255, 245, 0.28)');
+        moonGlow.addColorStop(0.45, 'rgba(255, 245, 210, 0.14)');
+        moonGlow.addColorStop(1, 'rgba(255, 220, 160, 0)');
+        ctx.fillStyle = moonGlow;
+        ctx.fillRect(mx - moonR, my - moonR, moonR * 2, moonR * 2);
+
+        ctx.restore();
+      }
+      return;
+    }
+
+    // Fallback: Procedural drawing if image is loading
+
+    // Sunlit surface base gradient: high-albedo regolith from bright sunward limb to inner ivory
+    const sunlitBase = ctx.createRadialGradient(
+      mx + moonR * 0.65, my - moonR * 0.2, 2,
+      mx, my, moonR * 1.15
+    );
+    sunlitBase.addColorStop(0, '#FFFFFF');
+    sunlitBase.addColorStop(0.25, '#FAF6EA');
+    sunlitBase.addColorStop(0.55, '#E8DFCB');
+    sunlitBase.addColorStop(0.85, '#D5C9B3');
+    sunlitBase.addColorStop(1, '#BFB199');
+    ctx.fillStyle = sunlitBase;
+    ctx.fillRect(mx - moonR, my - moonR, moonR * 2, moonR * 2);
+
+    // Realistic Lunar Maria (Dark basalt lava plains on visible side)
+    // Mare Serenitatis, Mare Tranquillitatis, Mare Crisium, Mare Fecunditatis
+    const sunlitMaria = [
+      { dx: 5, dy: -9, rx: 6, ry: 5, rot: 0.2, op: 0.35 },       // Mare Serenitatis
+      { dx: 7, dy: -2, rx: 6.5, ry: 5.5, rot: -0.1, op: 0.38 },    // Mare Tranquillitatis
+      { dx: 15, dy: -4, rx: 4, ry: 5, rot: 0.1, op: 0.42 },      // Mare Crisium (isolated oval)
+      { dx: 8, dy: 6, rx: 7, ry: 6, rot: 0.3, op: 0.34 },        // Mare Fecunditatis
+      { dx: 4, dy: 13, rx: 4.5, ry: 4, rot: -0.2, op: 0.30 },    // Mare Nectaris
+      { dx: 2, dy: -16, rx: 4, ry: 3, rot: 0.15, op: 0.26 },     // Northern mare patch
+    ];
+    for (const m of sunlitMaria) {
+      ctx.save();
+      ctx.translate(mx + m.dx, my + m.dy);
+      ctx.rotate(m.rot);
+      ctx.fillStyle = `rgba(128, 120, 108, ${m.op})`;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, m.rx, m.ry, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Realistic Impact Craters with 3D Sunlit Rim & Cast Shadow
+    // Sun shines from the right/top-right
+    const sunlitCraters = [
+      { dx: 12, dy: 12, r: 2.8, ray: true },  // Tycho crater (prominent south)
+      { dx: 3, dy: 8, r: 2.2 },               // Albategnius / Ptolemaeus near terminator
+      { dx: 2, dy: -6, r: 2.0 },              // Menelaus
+      { dx: 10, dy: -14, r: 1.8 },            // Atlas / Hercules
+      { dx: 17, dy: 4, r: 1.7 },              // Langrenus
+      { dx: 8, dy: 2, r: 1.9 },               // Theophilus
+      { dx: 14, dy: -10, r: 1.4 },            // Cleomedes
+      { dx: 2.5, dy: 17, r: 1.6 },            // Clavius
+    ];
+
+    for (const c of sunlitCraters) {
+      const cx = mx + c.dx;
+      const cy = my + c.dy;
+
+      // Dark crater floor & shadowed western rim
+      ctx.fillStyle = 'rgba(78, 70, 62, 0.58)';
+      ctx.beginPath();
+      ctx.arc(cx - 0.4, cy + 0.3, c.r, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Bright sunlit eastern/sunward rim crest
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.88)';
+      ctx.beginPath();
+      ctx.arc(cx + 0.35, cy - 0.3, c.r * 0.72, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Deep shadowed center cavity
+      ctx.fillStyle = 'rgba(52, 46, 40, 0.75)';
+      ctx.beginPath();
+      ctx.arc(cx - 0.1, cy + 0.1, c.r * 0.42, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Central peak caught in sunlight
+      if (c.r >= 2.0) {
+        ctx.fillStyle = '#FFFFFF';
+        ctx.beginPath();
+        ctx.arc(cx + 0.1, cy - 0.1, 0.55, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Tycho crater bright ejecta rays radiating outward
+      if (c.ray) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.28)';
+        ctx.lineWidth = 0.55;
+        const rays = [
+          [-9, -5], [-7, -12], [-2, -18], [4, -14],
+          [-11, 2], [5, 4], [-4, 7]
+        ];
+        for (const [rx, ry] of rays) {
+          ctx.beginPath();
+          ctx.moveTo(cx, cy);
+          ctx.lineTo(cx + rx, cy + ry);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+    }
+
+    // Rugged mountain peaks casting shadows across the terminator
+    // Sunlit mountain peaks protruding just into darkness along the center line
+    const peaks = [
+      { y: -18, x: -0.6, r: 0.9 },
+      { y: -11, x: -1.2, r: 1.1 },
+      { y: -3,  x: -0.8, r: 1.0 },
+      { y: 4,   x: -1.4, r: 1.2 },
+      { y: 11,  x: -0.9, r: 0.95 },
+      { y: 19,  x: -0.5, r: 0.8 },
+    ];
+    for (const p of peaks) {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.82)';
+      ctx.beginPath();
+      ctx.arc(mx + p.x, my + p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Shadow behind the peak
+      ctx.fillStyle = 'rgba(30, 24, 46, 0.65)';
+      ctx.beginPath();
+      ctx.arc(mx + p.x - p.r * 1.1, my + p.y + 0.3, p.r * 0.8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Natural terminator shadow falloff (grazing sunlight angle near the day-night divide)
+    const terminatorShadow = ctx.createLinearGradient(mx - 2, my, mx + 11, my);
+    terminatorShadow.addColorStop(0, 'rgba(32, 24, 50, 0.62)');
+    terminatorShadow.addColorStop(0.35, 'rgba(65, 54, 78, 0.25)');
+    terminatorShadow.addColorStop(0.7, 'rgba(120, 110, 125, 0.08)');
+    terminatorShadow.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = terminatorShadow;
+    ctx.fillRect(mx - 4, my - moonR, 16, moonR * 2);
+
+    // Bright outer limb edge highlight (crisp sunlit crescent boundary)
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+    ctx.lineWidth = 1.1;
+    ctx.beginPath();
+    ctx.arc(mx, my, moonR - 0.5, -Math.PI / 2, Math.PI / 2, false);
+    ctx.stroke();
+
+    ctx.restore();
   }
 }

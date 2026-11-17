@@ -74,8 +74,8 @@ export default function BoardPanel() {
         if (a.settleBetApi) {
           a.settleBetApi({ betId, slot, mult, payout: reward, bet, tier, isOut: false })
             .then((res) => {
-              if (res?.wallet !== undefined) {
-                a.setCoins(res.wallet);
+              if (res?.source !== 'local_fallback' && res?.wallet !== undefined) {
+                a.setCoins(Number(res.wallet));
               }
             })
             .catch(() => {});
@@ -104,8 +104,8 @@ export default function BoardPanel() {
         if (a.settleBetApi) {
           a.settleBetApi({ betId, slot: -1, mult: 0, payout: 0, bet, tier, isOut: true })
             .then((res) => {
-              if (res?.wallet !== undefined) {
-                a.setCoins(res.wallet);
+              if (res?.source !== 'local_fallback' && res?.wallet !== undefined) {
+                a.setCoins(Number(res.wallet));
               }
             })
             .catch(() => {});
@@ -176,8 +176,8 @@ export default function BoardPanel() {
       if (!free && a.dropBetApi) {
         a.dropBetApi(currentBet, chosenTier)
           .then((res) => {
-            if (res?.wallet !== undefined) {
-              a.setCoins(res.wallet);
+            if (res?.source !== 'local_fallback' && res?.wallet !== undefined) {
+              a.setCoins(Number(res.wallet));
             }
             // Spawn ball with target ALREADY DECIDED from the top!
             const ball = eng.drop({

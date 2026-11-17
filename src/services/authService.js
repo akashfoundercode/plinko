@@ -34,7 +34,13 @@ export const authService = {
         setAuthToken(token);
         try {
           if (data.login_token) localStorage.setItem('login_token', data.login_token);
-          if (data.data) localStorage.setItem('user_profile', JSON.stringify(data.data));
+          const profile = typeof data.data === 'object' && data.data ? { ...data.data } : {};
+          const userWallet = data.total_wallet !== undefined ? data.total_wallet : data.wallet;
+          if (userWallet !== undefined) {
+            profile.total_wallet = Number(userWallet);
+            profile.wallet = Number(userWallet);
+          }
+          localStorage.setItem('user_profile', JSON.stringify(profile));
         } catch {}
       }
 

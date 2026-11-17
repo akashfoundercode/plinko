@@ -163,22 +163,22 @@ export default function LiveBetsPanel() {
 
   return (
     <div className="flex flex-col h-full space-y-2.5">
-      {/* 2 Main Toggle Buttons matching user request: [ LIVE PLAYERS | MY HISTORY ] */}
-      <div className="grid grid-cols-2 gap-1.5 p-1 bg-[#140f29] rounded-2xl border-2 border-[#2f2454] shrink-0">
+      {/* 2 Main Top Toggle Buttons: [ LIVE BETS | MY HISTORY ] */}
+      <div className="grid grid-cols-2 gap-2 p-1 bg-[#140f29] rounded-2xl border-2 border-[#2f2454] shrink-0">
         <button
           type="button"
           onClick={() => {
             sfx.click();
             setActiveTab('live');
           }}
-          className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl font-display text-xs sm:text-sm tracking-wide transition-all cursor-pointer ${
+          className={`flex items-center justify-center gap-2 py-2 px-3 rounded-xl font-display text-xs sm:text-sm tracking-wide transition-all cursor-pointer select-none ${
             activeTab === 'live'
-              ? 'bg-gradient-to-b from-[#6b5099] to-[#4d3674] border-2 border-[#8165af] text-white shadow-[0_2px_0_#2b1b44] font-bold'
-              : 'text-white/60 hover:text-white hover:bg-[#1e173a]'
+              ? 'bg-gradient-to-b from-[#ffe27a] to-[#f59e0b] border-2 border-[#d99f14] text-[#451a03] shadow-[0_2px_0_#92660a] font-bold'
+              : 'bg-[#231b40] border-2 border-[#392e66] text-white shadow-[0_2px_0_#120e24] hover:bg-[#2d2252]'
           }`}
         >
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
-          <span className="truncate">LIVE PLAYERS</span>
+          <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0 ring-2 ring-emerald-500/40" />
+          <span className="truncate">LIVE BETS</span>
         </button>
 
         <button
@@ -187,16 +187,20 @@ export default function LiveBetsPanel() {
             sfx.click();
             setActiveTab('my');
           }}
-          className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl font-display text-xs sm:text-sm tracking-wide transition-all cursor-pointer ${
+          className={`flex items-center justify-center gap-2 py-2 px-3 rounded-xl font-display text-xs sm:text-sm tracking-wide transition-all cursor-pointer select-none ${
             activeTab === 'my'
-              ? 'bg-gradient-to-b from-[#fcd34d] to-[#f59e0b] border-2 border-[#d97706] text-[#451a03] shadow-[0_2px_0_#78350f] font-bold'
-              : 'text-white/60 hover:text-white hover:bg-[#1e173a]'
+              ? 'bg-gradient-to-b from-[#ffe27a] to-[#f59e0b] border-2 border-[#d99f14] text-[#451a03] shadow-[0_2px_0_#92660a] font-bold'
+              : 'bg-[#231b40] border-2 border-[#392e66] text-white shadow-[0_2px_0_#120e24] hover:bg-[#2d2252]'
           }`}
         >
-          <User className="w-3.5 h-3.5 shrink-0" />
+          <User className={`w-4 h-4 shrink-0 ${activeTab === 'my' ? 'text-[#451a03]' : 'text-arcade-gold'}`} />
           <span className="truncate">MY HISTORY</span>
           {state.betHistory?.length > 0 && (
-            <span className="ml-0.5 px-1.5 py-0.2 rounded-full bg-black/30 text-[10px] leading-tight">
+            <span
+              className={`ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] leading-tight font-bold ${
+                activeTab === 'my' ? 'bg-[#451a03]/20 text-[#451a03]' : 'bg-black/40 text-amber-300'
+              }`}
+            >
               {state.betHistory.length}
             </span>
           )}
@@ -213,7 +217,7 @@ export default function LiveBetsPanel() {
             </div>
             <div className="rounded-xl bg-[#1b1435] border border-[#2e2350] p-1.5 text-center shadow-inner">
               <span className="text-[9px] font-display text-white/50 block uppercase leading-none">High Edge</span>
-              <span className="text-xs font-display text-amber-300 font-bold block mt-0.5">1.70X</span>
+              <span className="text-xs font-display text-amber-300 font-bold block mt-0.5">2.00X</span>
             </div>
             <div className="rounded-xl bg-[#1b1435] border border-[#2e2350] p-1.5 text-center shadow-inner">
               <span className="text-[9px] font-display text-white/50 block uppercase leading-none">Top Win</span>

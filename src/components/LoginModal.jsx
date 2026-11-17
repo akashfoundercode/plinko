@@ -26,7 +26,8 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }) {
       const res = await authService.login({ mobile, country_code: countryCode, password });
       if (res.success) {
         sfx.bonus();
-        notify(`Welcome ${res.user?.username || 'Player'}! Logged in with ${res.wallet || 8681} coins`, 'good');
+        const displayCoins = res.wallet !== undefined ? res.wallet : (res.user?.total_wallet || res.user?.wallet || 0);
+        notify(`Welcome ${res.user?.username || 'Player'}! Logged in with ${displayCoins} coins`, 'good');
         if (res.wallet !== undefined) {
           actions.setCoins(Number(res.wallet));
         }

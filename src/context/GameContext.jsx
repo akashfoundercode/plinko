@@ -9,6 +9,7 @@ import {
   useState,
 } from 'react';
 import plinkoService from '../services/plinkoService';
+import authService from '../services/authService';
 import {
   ASCEND_BONUS,
   ASCEND_REQ,
@@ -63,13 +64,24 @@ const initialState = () => ({
 function loadState() {
   const base = initialState();
   try {
+    const cachedProfile = authService.getCachedUser();
+    const cachedCoins =
+      cachedProfile?.total_wallet !== undefined
+        ? Number(cachedProfile.total_wallet)
+        : cachedProfile?.wallet !== undefined
+        ? Number(cachedProfile.wallet)
+        : null;
+
     const raw = localStorage.getItem(SAVE_KEY);
-    if (!raw) return base;
+    if (!raw) {
+      return cachedCoins !== null ? { ...base, coins: cachedCoins } : base;
+    }
     const s = JSON.parse(raw);
+    const initialCoins = cachedCoins !== null ? cachedCoins : (s.coins !== undefined ? s.coins : base.coins);
     return {
       ...base,
       ...s,
-      coins: s.coins !== undefined ? s.coins : base.coins,
+      coins: initialCoins,
       tierBalls: { ...defaultTierBalls, ...(s.tierBalls || {}) },
       selectedTier: s.selectedTier !== undefined ? s.selectedTier : 0,
       slotLevels: Array.isArray(s.slotLevels) && s.slotLevels.length === 9 ? s.slotLevels : base.slotLevels,

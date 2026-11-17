@@ -97,15 +97,23 @@ export const plinkoService = {
     }
 
     // Fallback local session if no server response
+    const cachedUser = authService.getCachedUser();
+    const cachedCoins =
+      cachedUser?.total_wallet !== undefined
+        ? Number(cachedUser.total_wallet)
+        : cachedUser?.wallet !== undefined
+        ? Number(cachedUser.wallet)
+        : undefined;
+
     return {
       success: true,
       user: {
-        id: 'usr_guest',
-        username: 'GuestPlayer',
+        id: cachedUser?.id || 'usr_guest',
+        username: cachedUser?.username || 'GuestPlayer',
         avatar: '🎮',
       },
       wallet: {
-        coins: 1000,
+        coins: cachedCoins,
         sp: 0,
       },
       progress: {

@@ -44,9 +44,11 @@ export default function WalletModal({ open, onClose }) {
     sfx.click();
     try {
       const sess = await plinkoService.initSession();
-      if (sess?.wallet?.coins !== undefined) {
+      if (sess?.source !== 'local_fallback' && sess?.wallet?.coins !== undefined) {
         actions.setCoins(Number(sess.wallet.coins));
         notify(`Wallet synced: ₹${sess.wallet.coins}`, 'good');
+      } else {
+        notify('Wallet is up to date', 'good');
       }
     } catch {
       notify('Failed to sync wallet', 'bad');
