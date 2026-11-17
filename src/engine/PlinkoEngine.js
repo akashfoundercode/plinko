@@ -365,28 +365,28 @@ export class PlinkoEngine {
           const idealX = spawnX + (info.targetX - spawnX) * s;
 
           const diffX = idealX - x;
-          // Target horizontal speed with smooth velocity steering (strictly calm, no sudden rush)
-          const targetVx = Math.max(-1.5, Math.min(1.5, diffX * 0.10));
+          // Target horizontal speed with smooth velocity steering (calm, steady, natural fall)
+          const targetVx = Math.max(-1.4, Math.min(1.4, diffX * 0.10));
           Body.setVelocity(ball, {
             x: ball.velocity.x + (targetVx - ball.velocity.x) * 0.10,
-            y: Math.max(1.15, ball.velocity.y), // guarantee smooth downward momentum, never stall on pegs
+            y: Math.min(2.8, Math.max(0.9, ball.velocity.y)), // calm downward momentum, no stalling & no rushing
           });
         } else {
-          // Inside slot chute (y >= slotTop): smoothly glide straight down onto the multiplier card
+          // Inside slot chute (y >= slotTop): gently descend all the way down into the pocket onto the card
           const diffX = info.targetX - x;
           Body.setVelocity(ball, {
-            x: diffX * 0.12,
-            y: Math.min(3.8, Math.max(2.2, ball.velocity.y)),
+            x: diffX * 0.14,
+            y: 1.1, // calm, realistic descent speed (not fast, no sudden touch completion)
           });
         }
       }
 
-      // Speed limits: prevent flying & rushing
+      // Speed limits: calm realistic motion, strictly prevents rushing
       const curSpeed = Math.hypot(ball.velocity.x, ball.velocity.y);
-      if (curSpeed > 4.6) {
+      if (curSpeed > 3.2) {
         Body.setVelocity(ball, {
-          x: (ball.velocity.x / curSpeed) * 4.6,
-          y: (ball.velocity.y / curSpeed) * 4.6,
+          x: (ball.velocity.x / curSpeed) * 3.2,
+          y: (ball.velocity.y / curSpeed) * 3.2,
         });
       }
 

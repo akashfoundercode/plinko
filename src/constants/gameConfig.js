@@ -31,7 +31,7 @@ export const BOARD = {
   slotCount: 9, // Total 9 multiplier slots
   outGutterW: 36, // Left and Right OUT gutters width
   slotTop: 366, // y where the slot dividers start
-  settleY: 404, // ball is scored once it lands deep in the slot pocket
+  settleY: 414, // ball physically lands deep inside the slot pocket onto the card
 };
 
 // 9 peg row colors matching the reference screenshot:
