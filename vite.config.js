@@ -13,6 +13,8 @@ export default defineConfig({
     },
   },
   server: {
+    host: '0.0.0.0',
+    port: 3000,
     proxy: {
       '/api': {
         target: 'https://api.wingo4all.site',
@@ -20,6 +22,10 @@ export default defineConfig({
         secure: false,
       },
     },
+  },
+  preview: {
+    host: '0.0.0.0',
+    port: 4173,
   },
   build: { chunkSizeWarningLimit: 2000 },
 });

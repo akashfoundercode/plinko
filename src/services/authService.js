@@ -21,8 +21,14 @@ export const authService = {
 
     if (res.ok && res.data) {
       const data = res.data;
-      // Extract bearer token from response
-      const token = data.data?.token || data.login_token;
+      // Extract bearer token from response (support all backend schema variations)
+      const token =
+        data.token ||
+        data.data?.token ||
+        data.login_token ||
+        data.access_token ||
+        data.data?.access_token ||
+        (typeof data.data === 'string' ? data.data : null);
 
       if (token) {
         setAuthToken(token);

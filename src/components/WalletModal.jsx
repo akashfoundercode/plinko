@@ -6,9 +6,36 @@ import { fmt } from '../utils/format';
 import { sfx } from '../utils/sound';
 import plinkoService from '../services/plinkoService';
 
+const TOP_UP_PACKAGES = [
+  { coins: 100, label: 'Starter Pack', badge: 'STARTER' },
+  { coins: 500, label: 'Arcade Pack', badge: 'POPULAR' },
+  { coins: 1000, label: 'Pro Player', badge: 'VALUE' },
+  { coins: 5000, label: 'High Roller', badge: 'VIP' },
+];
+
 export default function WalletModal({ open, onClose }) {
   const { state, actions, notify, userSession } = useGame();
   const [syncing, setSyncing] = useState(false);
+  const [claimedBonus, setClaimedBonus] = useState(false);
+  const [customAmount, setCustomAmount] = useState('');
+
+  const handleClaimFreeBonus = () => {
+    if (claimedBonus) return;
+    sfx.click();
+    actions.addCoins(500);
+    setClaimedBonus(true);
+    notify('+500 Free Bonus Coins added!', 'good');
+    setTimeout(() => setClaimedBonus(false), 5000);
+  };
+
+  const handleDeposit = (amt) => {
+    const val = Number(amt);
+    if (!val || val <= 0) return;
+    sfx.click();
+    actions.addCoins(val);
+    notify(`+${fmt(val)} coins added to wallet!`, 'good');
+    setCustomAmount('');
+  };
 
   if (!open) return null;
 

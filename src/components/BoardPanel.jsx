@@ -172,29 +172,52 @@ export default function BoardPanel() {
       const ballValue = free ? 5 : currentBet;
       const initialBetId = `bet_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
 
-      // Spawn ball in engine
-      const ball = eng.drop({ value: ballValue, free, tier: chosenTier, bet: currentBet, betId: initialBetId });
-
-      // Trigger API 3: Drop Ball (Place Bet) on server & connect server outcome target (slot, mult, isOut)
+      // Decide target outcome with backend on drop BEFORE ball spawns
       if (!free && a.dropBetApi) {
         a.dropBetApi(currentBet, chosenTier)
           .then((res) => {
-            if (res) {
-              if (res.wallet !== undefined) {
-                a.setCoins(res.wallet);
-              }
-              // Attach server outcome to active ball
-              eng.setBallTarget(ball, {
-                orderid: res.orderid || res.betId,
-                targetSlot: res.targetSlot,
-                targetMult: res.targetMult,
-                isOut: res.isOut,
-              });
+            if (res?.wallet !== undefined) {
+              a.setCoins(res.wallet);
             }
+            // Spawn ball with target ALREADY DECIDED from the top!
+            const ball = eng.drop({
+              value: ballValue,
+              free,
+              tier: chosenTier,
+              bet: currentBet,
+              betId: res?.orderid || res?.betId || initialBetId,
+              targetSlot: res?.targetSlot,
+              targetMult: res?.targetMult,
+              isOut: res?.isOut,
+            });
+            setActive(eng.activeCount());
+            a.recordDrop(chosenTier);
+            sfx.drop();
           })
-          .catch(() => {});
+          .catch((err) => {
+            console.warn('Drop bet error, fallback drop:', err);
+            const ball = eng.drop({
+              value: ballValue,
+              free,
+              tier: chosenTier,
+              bet: currentBet,
+              betId: initialBetId,
+            });
+            setActive(eng.activeCount());
+            a.recordDrop(chosenTier);
+            sfx.drop();
+          });
+        return true;
       }
 
+      // Fallback for free ball
+      const ball = eng.drop({
+        value: ballValue,
+        free,
+        tier: chosenTier,
+        bet: currentBet,
+        betId: initialBetId,
+      });
       setActive(eng.activeCount());
       a.recordDrop(chosenTier);
       if (free) a.useFreeBall(Date.now() + d.freeCooldownMs);

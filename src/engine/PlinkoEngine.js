@@ -145,10 +145,10 @@ export class PlinkoEngine {
     return this.balls.size;
   }
 
-  drop({ value, free = false, tier = 0, bet = 0, betId = null }) {
+  drop({ value, free = false, tier = 0, bet = 0, betId = null, targetSlot, targetMult, isOut = false }) {
     const { ballR, spawnX, spawnY } = BOARD;
     // Drops cleanly inside the starting 2 pegs
-    const spawnOffsetX = rand(-3, 3);
+    const spawnOffsetX = rand(-2, 2);
     const ball = Bodies.circle(spawnX + spawnOffsetX, spawnY, ballR, {
       restitution: 0.52,
       friction: 0.001,
@@ -170,9 +170,15 @@ export class PlinkoEngine {
       born: performance.now(),
       stuck: 0,
     };
-    Body.setVelocity(ball, { x: rand(-0.4, 0.4), y: 0.4 });
+    Body.setVelocity(ball, { x: rand(-0.25, 0.25), y: 0.4 });
     Composite.add(this.engine.world, ball);
     this.balls.add(ball);
+
+    // Pre-determine target trajectory from the very drop!
+    if (targetSlot !== undefined || targetMult !== undefined || isOut) {
+      this.setBallTarget(ball, { orderid: betId, targetSlot, targetMult, isOut });
+    }
+
     return ball;
   }
 
@@ -188,8 +194,8 @@ export class PlinkoEngine {
     ball.plugin.targetMult = targetMult;
 
     if (outFlag) {
-      // Pick the side the ball naturally leans towards
-      const isLeft = ball.position.x <= W / 2;
+      // Pick left or right gutter (random 50/50 or whichever side spawn leaned)
+      const isLeft = (ball.position?.x !== undefined ? ball.position.x : Math.random() * W) <= W / 2;
       ball.plugin.outSide = isLeft ? 'left' : 'right';
       ball.plugin.targetX = isLeft ? outGutterW * 0.5 : W - outGutterW * 0.5;
     } else {
@@ -240,7 +246,7 @@ export class PlinkoEngine {
     if (info.targetX !== undefined) {
       const y = ball.position.y;
       const { slotTop = 366, spawnX = 220 } = BOARD;
-      const t = Math.max(0, Math.min(1, (y - 50) / (slotTop - 90)));
+      const t = Math.max(0, Math.min(1, (y - 30) / (slotTop - 45)));
       const s = t * t * (3 - 2 * t);
       const idealX = spawnX + (info.targetX - spawnX) * s;
 
@@ -249,9 +255,8 @@ export class PlinkoEngine {
       // If peg is to the right of idealX, bounce left; if peg is to the left, bounce right
       const bounceDir = dx > 0 ? -1 : 1;
 
-      // Gentle lateral kick in the bounce direction (softer near bottom to avoid overshooting)
-      const forceMag = y >= 310 ? 0.00015 : 0.00025;
-      Body.applyForce(ball, ball.position, { x: bounceDir * forceMag, y: 0 });
+      // Gentle lateral kick in the bounce direction (natural ricochet)
+      Body.applyForce(ball, ball.position, { x: bounceDir * 0.00018, y: 0 });
     }
 
     const derived = this.cb.getDerived();
@@ -333,53 +338,34 @@ export class PlinkoEngine {
 
       if (info.targetX !== undefined) {
         if (y < slotTop) {
-          // Cubic smoothstep curve from spawnX to targetX
-          const t = Math.max(0, Math.min(1, (y - 50) / (slotTop - 90)));
+          // Cubic smoothstep curve from spawnX (220) to targetX over the entire fall
+          const t = Math.max(0, Math.min(1, (y - 30) / (slotTop - 45)));
           const s = t * t * (3 - 2 * t);
           const idealX = spawnX + (info.targetX - spawnX) * s;
 
           const diffX = idealX - x;
-          // Target horizontal speed with smooth velocity steering
-          const targetVx = Math.max(-1.8, Math.min(1.8, diffX * 0.12));
-          // Exponential smoothing on horizontal velocity: zero snake-like vibration!
+          // Target horizontal speed with smooth velocity steering (strictly calm, no sudden rush)
+          const targetVx = Math.max(-1.5, Math.min(1.5, diffX * 0.10));
           Body.setVelocity(ball, {
-            x: ball.velocity.x + (targetVx - ball.velocity.x) * 0.08,
+            x: ball.velocity.x + (targetVx - ball.velocity.x) * 0.10,
             y: ball.velocity.y,
           });
-
-          // PRE-ALIGNMENT: When clearing bottom pegs (y >= 315 to slotTop = 366),
-          // firmly center the ball into targetX opening so it NEVER clips a divider post
-          if (y >= 315) {
-            const alignDiff = info.targetX - x;
-            Body.setPosition(ball, {
-              x: x + alignDiff * 0.16,
-              y: ball.position.y,
-            });
-            Body.setVelocity(ball, {
-              x: alignDiff * 0.05,
-              y: ball.velocity.y,
-            });
-          }
         } else {
-          // Inside slot chute (y >= slotTop): lock directly down the targetX chute into the pocket
+          // Inside slot chute (y >= slotTop): smoothly glide straight down onto the multiplier card
           const diffX = info.targetX - x;
-          Body.setPosition(ball, {
-            x: x + diffX * 0.25,
-            y: ball.position.y,
-          });
           Body.setVelocity(ball, {
-            x: 0,
-            y: Math.min(3.6, Math.max(1.8, ball.velocity.y)), // steady descent deep onto the slot card
+            x: diffX * 0.12,
+            y: Math.min(3.6, Math.max(2.0, ball.velocity.y)),
           });
         }
       }
 
       // Speed limits: prevent flying & rushing
       const curSpeed = Math.hypot(ball.velocity.x, ball.velocity.y);
-      if (curSpeed > 4.8) {
+      if (curSpeed > 4.6) {
         Body.setVelocity(ball, {
-          x: (ball.velocity.x / curSpeed) * 4.8,
-          y: (ball.velocity.y / curSpeed) * 4.8,
+          x: (ball.velocity.x / curSpeed) * 4.6,
+          y: (ball.velocity.y / curSpeed) * 4.6,
         });
       }
 
