@@ -196,7 +196,7 @@ export class PlinkoEngine {
       born: performance.now(),
       stuck: 0,
     };
-    Body.setVelocity(ball, { x: 0, y: 0.7 });
+    Body.setVelocity(ball, { x: 0, y: 0.5 });
     Composite.add(this.engine.world, ball);
     this.balls.add(ball);
 
@@ -475,7 +475,7 @@ export class PlinkoEngine {
         const dist = Math.hypot(dx, dy);
 
         const passedY = ball.position.y >= wp.y && Math.abs(dx) < 14;
-        if (dist < 8 || passedY) {
+        if (dist < 6 || passedY) {
           if (wp.isPeg && wp.peg && !wp.triggered) {
             wp.triggered = true;
             this.triggerPegHit(ball, wp.peg);
@@ -497,15 +497,15 @@ export class PlinkoEngine {
       const dy = curWp.y - ball.position.y;
       const dist = Math.hypot(dx, dy) || 1;
 
-      // Calm, enjoyable arcade drop speed (~2.2 px per step)
-      const speed = 2.2;
+      // Relaxed, smooth, authentic arcade drop speed (~1.45 px per step)
+      const speed = 1.45;
       const targetVx = (dx / dist) * speed;
-      const targetVy = Math.max(0.7, (dy / dist) * speed);
+      const targetVy = Math.max(0.45, (dy / dist) * speed);
 
       // Smooth blend rate gives natural inertia feel with zero jitter
       Body.setVelocity(ball, {
-        x: ball.velocity.x + (targetVx - ball.velocity.x) * 0.38,
-        y: ball.velocity.y + (targetVy - ball.velocity.y) * 0.38,
+        x: ball.velocity.x + (targetVx - ball.velocity.x) * 0.32,
+        y: ball.velocity.y + (targetVy - ball.velocity.y) * 0.32,
       });
 
       info.trail.push({ x: ball.position.x, y: ball.position.y });
